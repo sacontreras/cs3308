@@ -41,8 +41,6 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
             print(f"\tcannot index this document due to exception: {e}")
             return
             
-        self.storage.insert_doc_dict(doc_url, doc_id)
-            
         parsed_doc_url = urlparse(doc_url)
         print(f"\tparsed_doc_url: {parsed_doc_url}")
         
@@ -56,6 +54,12 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         soup = BeautifulSoup(raw_html, features="html.parser")
         # print(f"soup: {soup}")
         html_body = soup.find("body")
+        if html_body is None or not hasattr(html_body, "contents") or html_body.contents is None:
+            print("\tcannot index this document since it does not have an html BODY tag")
+            return
+            
+        self.storage.insert_doc_dict(doc_url, doc_id)
+            
         elements = html_body.contents 
         # print(f"content: {content}\n\n")
         
@@ -75,22 +79,27 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
             n_links = len(links)
             if n_links > 0:
                 print(f"\thtml doc contains {n_links} outlinks")
+                
                 if n_links > space_remaining:
                     print(f"\t\ttruncating outlinks count to remaining space in queue ({space_remaining})")
                     links = links[:space_remaining]
-                for link in (links.pop(0) for _ in range(len(links))):
-                    print(f"\t\tqueueing link: {link}")
                     
+                n_queued_or_crawled = 0
+                for link in (links.pop(0) for _ in range(len(links))):
                     if link.startswith('//'):
                         link = f"{parsed_doc_url.scheme}:{link}"
                     
                     elif link.startswith('/') or link.startswith('#'):
                         link = f"{parsed_doc_url.scheme}://{parsed_doc_url.netloc}{link}"
                         
-                        
-                    if link not in self.crawled:
+                    if link not in self.crawled and link not in self.tocrawl:
+                        print(f"\t\tqueueing link: {link}")
                         self.links_queue += 1
                         self.tocrawl.append(link)
+                    else:
+                        n_queued_or_crawled += 1
+                        
+                print(f"\t\t*** {n_queued_or_crawled} of the remaining outlinks are either queued to be or have already been crawled ***")
             else:
                 print("\thtml doc contains NO outlinks")
         else:
@@ -152,7 +161,8 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         self.__crawl_web__(url)
         print()
         
-        print('Indexing Complete, writing to storage (%s): %.2d:%.2d' % (self.storage.short_desc, t2.tm_hour, t2.tm_min))
+        t2 = time.localtime()
+        print('\nIndexing Complete, writing to storage (%s): %.2d:%.2d' % (self.storage.short_desc, t2.tm_hour, t2.tm_min))
         
         # # S.C., DEBUG: sanity check for entries in the index for terms occurring in more than one document
         # #   this is a virtual guarantee so, if this list is empty, something went wrong!
