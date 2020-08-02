@@ -131,19 +131,3 @@ class LocalFileInvertedIndexer(AbstractInvertedIndexer):
         print('End Time: %.2d:%.2d' % (t2.tm_hour, t2.tm_min))
      
         return True
-
-
-
-
-"""
-==========================================================================================
-    >>> main
-
-    This section is the 'main' or starting point of the indexer program. The python interpreter will find this 'main' routine and execute it first.
-==========================================================================================
-
-"""
-
-if __name__ == '__main__':
-    LocalFileInvertedIndexer().reindex_directory(doc_dir=os.getcwd()+'/cacm', verbose=False)
-    

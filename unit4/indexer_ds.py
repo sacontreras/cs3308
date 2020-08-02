@@ -189,10 +189,40 @@ stopwords = [
  'wouldn',
  "wouldn't",
 
- # other non-contrib words
+ # other non-contrib words (HTML tags)
  "html",
  "pre",
- "form"
+ "form",
+ "h1",
+ "h2",
+ "h3",
+ "h4",
+ "h5",
+ "h6",
+ "p",
+ # "table",
+ "tbody",
+ "th",
+ "tr",
+ "td",
+ "ul",
+ "ol",
+ "li",
+ "div",
+ "span",
+ "img",
+ "i",
+ "em",
+ "b",
+ # "strong",
+ "a",
+ "hr",
+ "abbr",
+ # "frame",
+ "frameset",
+ "iframe",
+ "textarea"
+ # , # there are a lot more but some of those words could be used as actual content in articles
 ]
 
 

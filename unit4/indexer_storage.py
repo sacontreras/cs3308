@@ -10,7 +10,7 @@ class AbstractInvertedIndexStorage(ABC):
         super().__init__()
 
     @abstractmethod
-    def init_storage(self):
+    def init_storage(self, overwrite=True):
         pass
     
     @abstractmethod
@@ -26,6 +26,10 @@ class AbstractInvertedIndexStorage(ABC):
         pass
     
     @abstractmethod
+    def purge_storage(self):
+        pass
+    
+    @abstractmethod
     def finalize_storage(self):
         pass
 
@@ -37,8 +41,9 @@ class SQLiteInvertedIndexStorage(AbstractInvertedIndexStorage):
         self.con = None
         self.cur = None
         super().__init__(root_dir, 'sqlite database')
+        
 
-    def init_storage(self):
+    def init_storage(self, overwrite=True):
         #
         # Create a sqlite database to hold the inverted index. The isolation_level statment turns
     
@@ -55,34 +60,56 @@ class SQLiteInvertedIndexStorage(AbstractInvertedIndexStorage):
         #
         
         # Document Dictionary Table
-        self.cur.execute("drop table if exists DocumentDictionary") 
-        self.cur.execute("drop index if exists idxDocumentDictionary")
+        if overwrite:
+            self.cur.execute("drop table if exists DocumentDictionary") 
+            self.cur.execute("drop index if exists idxDocumentDictionary")
         self.cur.execute("create table if not exists DocumentDictionary (DocumentName text, DocId int)") 
         self.cur.execute("create index if not exists idxDocumentDictionary on DocumentDictionary (DocId)")
         
         # Term Dictionary Table
-        self.cur.execute("drop table if exists TermDictionary") 
-        self.cur.execute("drop index if exists idxTermDictionary")
+        if overwrite:
+            self.cur.execute("drop table if exists TermDictionary") 
+            self.cur.execute("drop index if exists idxTermDictionary")
         self.cur.execute("create table if not exists TermDictionary (Term text, TermId int, N int, df_t int, idf_t real)") 
         self.cur.execute("create index if not exists idxTermDictionary on TermDictionary (TermId)")
         
         # Postings Table
-        self.cur.execute("drop table if exists Posting") 
-        self.cur.execute("drop index if exists idxPosting1") 
-        self.cur.execute("drop index if exists idxPosting2")
+        if overwrite:
+            self.cur.execute("drop table if exists Posting") 
+            self.cur.execute("drop index if exists idxPosting1") 
+            self.cur.execute("drop index if exists idxPosting2")
         self.cur.execute("create table if not exists Posting (TermId int, DocId int, tf_t_d int, idf_t real, tfidf real)") 
         self.cur.execute("create index if not exists idxPosting1 on Posting (TermId)")
         self.cur.execute("create index if not exists idxPosting2 on Posting (Docid)")
+        
     
     def insert_doc_dict(self, doc_path, doc_id):
         self.cur.execute("insert into DocumentDictionary values (?, ?)", (doc_path, doc_id))
+        
     
     def insert_term_dict(self, term, termid, N, df_t, idf_t):
         # Insert a row into the TermDictionary for each unique term along with a termid which is na integer assigned to each term by incrementing an integer
         self.cur.execute("insert into TermDictionary values (?, ?, ?, ?, ?)", (term, termid, N, df_t, idf_t))
+        
     
     def insert_posting(self, termid, docid, tf_t_d, idf_t, tfidf):
         self.cur.execute("insert into Posting values (?, ?, ?, ?, ?)", (termid, docid, tf_t_d, idf_t, tfidf))
+        
+    
+    def purge_storage(self):
+        if self.con is None:
+            self.con = sqlite3.connect(self.root_dir + '/' + self.db_fname) 
+            self.con.isolation_level = None
+            self.cur = self.con.cursor()
+            
+        self.cur.execute("drop table if exists DocumentDictionary") 
+        self.cur.execute("drop index if exists idxDocumentDictionary")
+        self.cur.execute("drop table if exists TermDictionary") 
+        self.cur.execute("drop index if exists idxTermDictionary")
+        self.cur.execute("drop table if exists Posting") 
+        self.cur.execute("drop index if exists idxPosting1") 
+        self.cur.execute("drop index if exists idxPosting2")
+        
     
     def finalize_storage(self):
         #
