@@ -103,7 +103,7 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
             else:
                 print("\thtml doc contains NO outlinks")
         else:
-            print(f"\tskipping outlinks scan: outlinks queue is full {self.links_queue}")
+            print(f"\tskipping outlinks scan: outlinks queue is full")
                 
         print("\tINDEXING COMPLETE")
                     
@@ -154,15 +154,15 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         # Capture the start time of the routine so that we can determine the total running
         # time required to process the corpus
         #
-        t2 = time.localtime()
-        print('Start Time: %.2d:%.2d' % (t2.tm_hour, t2.tm_min))
+        t0 = time.localtime()
+        print('Start Time: %.2d:%.2d' % (t0.tm_hour, t0.tm_min))
         
         print()
         self.__crawl_web__(url)
         print()
         
-        t2 = time.localtime()
-        print('\nIndexing Complete, writing to storage (%s): %.2d:%.2d' % (self.storage.short_desc, t2.tm_hour, t2.tm_min))
+        t1 = time.localtime()
+        print('\nIndexing Complete (started at %.2d:%.2d), writing to storage (%s): %.2d:%.2d' % (t0.tm_hour, t0.tm_min, self.storage.short_desc, t1.tm_hour, t1.tm_min))
         
         # # S.C., DEBUG: sanity check for entries in the index for terms occurring in more than one document
         # #   this is a virtual guarantee so, if this list is empty, something went wrong!
@@ -204,8 +204,8 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         self.storage.finalize_storage()
         t2 = time.localtime()
         
-        print("Documents %i" % self.ds.n_documents) 
-        print("Terms %i" % self.ds.n_terms)
-        print("Tokens %i" % self.ds.n_tokens)
+        print("Documents: %i" % self.ds.n_documents) 
+        print("Terms: %i" % self.ds.n_terms)
+        print("Tokens: %i" % self.ds.n_tokens)
         t2 = time.localtime()
         print('End Time: %.2d:%.2d' % (t2.tm_hour, t2.tm_min))
