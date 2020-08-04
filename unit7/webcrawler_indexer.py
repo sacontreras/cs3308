@@ -3,9 +3,12 @@ from unit4.indexer_storage import SQLiteInvertedIndexStorage
 from unit4.indexer_ds import InvertedIndexDS
 import math  
 import time
+import datetime
+from common import disp, strfdelta
 from urllib.parse import urlparse
 from urllib.request import urlopen
 from bs4 import BeautifulSoup
+from bs4.element import Script, Comment
 import re
 import traceback
 
@@ -24,9 +27,24 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         self.tocrawl = []                # contains the queue of url's that will be crawled
         self.links_queue = 0             # counts the number of links in the queue to limit the depth of the crawl
         
+    
+    # this function *recursively* tokenizes only the CONTENT within tags (so html tags and attributes are excluded from the vocabulary)
+    def index_element(self, elt, depth=0):
+        if type(elt) is Script or type(elt) is Comment: # we are not interested in script/code and this element will contain no content/children we will want to index
+            return
+                
+        if hasattr(elt, "string") and elt.string is not None:
+            text = repr(elt.string).strip()
+            if len(text) > 0:
+                # pass the text extracted from the tag content to the parse_tokenize routine (of the InvertedIndexDS class) for indexing
+                self.ds.parse_tokenize(text)
         
-    # this function handles the specifics of opening the file, which won't change for this type of document source
-    # but processing (tokenizing) might; therefore, this function calls process_local_file() which can be overridden
+        if hasattr(elt, "contents") and len(elt.contents)>0: # then this tag contains child tags... recursively tokenize their content
+            if elt.name != "footer":
+                for c in elt.contents:
+                    self.index_element(c, depth+1)   
+        
+        
     def index_document_impl(self, doc_url, doc_id):
         #
         # Parse the URL and open it.
@@ -36,55 +54,54 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
             if http_response.getcode() != 200:
                 # raise ValueError(f"ERROR {http_response.getcode()} while opening {doc_url}.")
                 print(f"\tcannot index this document: http response code {http_response.getcode()}")
+                self.ds.n_documents -= 1    # since we don't actually index anything, we need to decrement this counter so TFIDF ccomputations are not thrown off
+                self.ds.n_documents_failed_indexing += 1
                 return
         except Exception as e:
             print(f"\tcannot index this document due to exception: {e}")
+            self.ds.n_documents -= 1    # since we don't actually index anything, we need to decrement this counter so TFIDF ccomputations are not thrown off
+            self.ds.n_documents_failed_indexing += 1
             return
             
         parsed_doc_url = urlparse(doc_url)
-        print(f"\tparsed_doc_url: {parsed_doc_url}")
         
         raw_html = http_response.read()
-        # print(f"raw_html: {raw_html}")
         
         #
         # Use BeautifulSoup modules to format web page as text that can
         # be parsed and indexed
         #
         soup = BeautifulSoup(raw_html, features="html.parser")
-        # print(f"soup: {soup}")
         html_body = soup.find("body")
         if html_body is None or not hasattr(html_body, "contents") or html_body.contents is None:
             print("\tcannot index this document since it does not have an html BODY tag")
+            self.ds.n_documents -= 1    # since we don't actually index anything, we need to decrement this counter so TFIDF ccomputations are not thrown off
+            self.ds.n_documents_failed_indexing += 1
             return
             
-        self.storage.insert_doc_dict(doc_url, doc_id)
-            
-        elements = html_body.contents 
-        # print(f"content: {content}\n\n")
         
-        # pass the text extracted from the web page to the parse_tokenize routine (of the InvertedIndexDS class) for indexing
-        for elt in elements:
-            s_elt = str(elt).strip()
-            if len(s_elt) > 0:
-                self.ds.parse_tokenize(s_elt)
+        self.storage.insert_doc_dict(doc_url, doc_id)
+                
+        
+        self.index_element(html_body)
             
+        
         #
         # Find all of the weblinks on the page put them in the stack to crawl through
         #
         if self.links_queue < self.max_n_outlinks:
-            space_remaining = self.max_n_outlinks - self.links_queue
             links = re.findall('''href=["'](.[^"']+)["']''', str(html_body), re.I)
 
             n_links = len(links)
             if n_links > 0:
                 print(f"\thtml doc contains {n_links} outlinks")
                 
-                if n_links > space_remaining:
-                    print(f"\t\ttruncating outlinks count to remaining space in queue ({space_remaining})")
-                    links = links[:space_remaining]
+                # if n_links > space_remaining:
+                #     print(f"\t\t*** truncating outlinks count to remaining space in queue ({space_remaining}): {n_links-space_remaining} will not be crawled ***")
+                #     links = links[:space_remaining]
                     
-                n_queued_or_crawled = 0
+                n_queued = 0
+                n_already_queued_or_crawled = 0
                 for link in (links.pop(0) for _ in range(len(links))):
                     if link.startswith('//'):
                         link = f"{parsed_doc_url.scheme}:{link}"
@@ -92,18 +109,30 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
                     elif link.startswith('/') or link.startswith('#'):
                         link = f"{parsed_doc_url.scheme}://{parsed_doc_url.netloc}{link}"
                         
-                    if link not in self.crawled and link not in self.tocrawl:
-                        print(f"\t\tqueueing link: {link}")
-                        self.links_queue += 1
-                        self.tocrawl.append(link)
+                    if self.links_queue < self.max_n_outlinks:
+                        if link not in self.crawled and link not in self.tocrawl:
+                            print(f"\t\tqueueing link: {link}")
+                            self.tocrawl.append(link)
+                            self.links_queue += 1
+                            n_queued += 1
+                        else:
+                            n_already_queued_or_crawled += 1
+                            
                     else:
-                        n_queued_or_crawled += 1
-                        
-                print(f"\t\t*** {n_queued_or_crawled} of the remaining outlinks are either queued to be or have already been crawled ***")
+                        break
+                    
+                if n_already_queued_or_crawled > 0:
+                    print(f"\t\t*** {n_already_queued_or_crawled} outlinks are either queued to be or have already been crawled ***")
+                    
+                n_not_queued = n_links - n_queued
+                if n_not_queued != n_already_queued_or_crawled and n_queued < n_links:
+                    print(f"\t\t*** {n_not_queued} were not crawled because max outlinks threshold has been reached ***")
+                    
             else:
-                print("\thtml doc contains NO outlinks")
+                print("\t*** html doc contains NO outlinks ***")
+                
         else:
-            print(f"\tskipping outlinks scan: outlinks queue is full")
+            print("\t*** skipping outlinks scan: max outlinks threshold reached ***")
                 
         print("\tINDEXING COMPLETE")
                     
@@ -154,6 +183,8 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         # Capture the start time of the routine so that we can determine the total running
         # time required to process the corpus
         #
+        
+        _t0 = datetime.datetime.now()
         t0 = time.localtime()
         print('Start Time: %.2d:%.2d' % (t0.tm_hour, t0.tm_min))
         
@@ -161,8 +192,9 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
         self.__crawl_web__(url)
         print()
         
+        _t1 = datetime.datetime.now()
         t1 = time.localtime()
-        print('\nIndexing Complete (started at %.2d:%.2d), writing to storage (%s): %.2d:%.2d' % (t0.tm_hour, t0.tm_min, self.storage.short_desc, t1.tm_hour, t1.tm_min))
+        print("\nIndexing Complete (started at %.2d:%.2d), writing to storage (%s): %.2d:%.2d" % (t0.tm_hour, t0.tm_min, self.storage.short_desc, t1.tm_hour, t1.tm_min))
         
         # # S.C., DEBUG: sanity check for entries in the index for terms occurring in more than one document
         # #   this is a virtual guarantee so, if this list is empty, something went wrong!
@@ -192,20 +224,31 @@ class WebCrawlInvertedIndexer(AbstractInvertedIndexer):
             
             # Insert a row into the posting table for each unique combination of Docid and termid
             for docid, tf_t_d in o_term.docids.items():
-                # tuple to insert is defined as (TermId, DocId, tfidf, docfreq, termfreq)
-                #   the only thing missing is tfidf, but we first need to compute idf
-                tfidf = tf_t_d * idf_t
+                self.storage.insert_posting(o_term.termid, docid, tf_t_d, idf_t, tfidf=tf_t_d*idf_t)
                 
-                self.storage.insert_posting(o_term.termid, docid, tf_t_d, idf_t, tfidf)
     
         #
         # Commit changes to the database and close the connection
         #
         self.storage.finalize_storage()
-        t2 = time.localtime()
         
-        print("Documents: %i" % self.ds.n_documents) 
-        print("Terms: %i" % self.ds.n_terms)
-        print("Tokens: %i" % self.ds.n_tokens)
+        
+        _t2 = datetime.datetime.now()
         t2 = time.localtime()
-        print('End Time: %.2d:%.2d' % (t2.tm_hour, t2.tm_min))
+        print("\nEnd Time: %.2d:%.2d\n" % (t2.tm_hour, t2.tm_min))
+        
+        disp("### Indexing Statistics:")
+        print("\tHTML Documents Indexed:")
+        print("\t\tSuccessfully: %i" % self.ds.n_documents) 
+        print("\t\tFailed: %i" % self.ds.n_documents_failed_indexing) 
+        print("\tTerms: %i" % self.ds.n_terms)
+        print("\tProcessed Tokens: %i" % self.ds.n_tokens) 
+        print("\tSkipped Tokens:") 
+        print("\t\t1st letter puncuation: %i" % self.ds.n_tokens_skipped__punc) 
+        print("\t\tpurely numeric: %i" % self.ds.n_tokens_skipped__number)  
+        print("\t\tfewer than 3 characters: %i" % self.ds.n_tokens_skipped__len2orless)
+        print("\t\tstop word: %i" % self.ds.n_tokens_skipped__stopword)
+        
+        print(f"\tElapsed Time: {strfdelta(_t2-_t0, '{hours}h:{minutes}m:{seconds}s')}")
+        print(f"\t\tDocument Processing: {strfdelta(_t1-_t0, '{hours}h:{minutes}m:{seconds}s')}")
+        print(f"\t\tWriting to storage ({self.storage.short_desc}): {strfdelta(_t2-_t1, '{hours}h:{minutes}m:{seconds}s')}")

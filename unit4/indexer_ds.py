@@ -242,7 +242,12 @@ class InvertedIndexDS():
     def __init__(self):
         self.d_inv_index = {}
         self.n_documents = 0
+        self.n_documents_failed_indexing = 0
         self.n_tokens = 0
+        self.n_tokens_skipped__punc = 0
+        self.n_tokens_skipped__number = 0
+        self.n_tokens_skipped__len2orless = 0
+        self.n_tokens_skipped__stopword = 0
         self.n_terms = 0
         
     # parse/tokenize content
@@ -275,21 +280,25 @@ class InvertedIndexDS():
             # Ignore any term that begins with a punctuation character
             if processed_token[0] in string.punctuation:
                 # if DEBUG_VERBOSE: print(f"IGNORED term '{processed_token}': begins with puncuation")
+                self.n_tokens_skipped__punc += 1
                 continue
             
             # Ignore any term that is a number
             if re.match(r'^([\s\d]+)$', processed_token):
                 # if DEBUG_VERBOSE: print(f"IGNORED term '{processed_token}': is a number")
+                self.n_tokens_skipped__number += 1
                 continue
             
             # Ignore any term that is 2 characters or shorter in length
             if len(processed_token) < 3:
                 # if DEBUG_VERBOSE: print(f"IGNORED term '{processed_token}': len < 3")
+                self.n_tokens_skipped__len2orless += 1
                 continue
             
             # skip if it is a stopword
             if processed_token in stopwords:
                 # if DEBUG_VERBOSE: print(f"IGNORED term '{processed_token}': is stopword")
+                self.n_tokens_skipped__stopword += 1
                 continue
             
             processed_token = p.stem(processed_token, 0,len(processed_token)-1)
